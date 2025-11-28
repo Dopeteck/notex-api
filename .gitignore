@@ -1,0 +1,9 @@
+cat > .gitignore << 'EOF'
+node_modules/
+.env
+.env.local
+service-account-key.json
+*.log
+.DS_Store
+.vscode/
+EOF
