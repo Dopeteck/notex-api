@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const db = require('./db'); // This already handles the connection!
+const db = require('./db');
 require('dotenv').config();
 
 const app = express();
@@ -25,9 +25,7 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// Add this after your middleware (after app.use statements)
-// and BEFORE the /api routes
-
+// Root and health check routes (ONLY ONCE!)
 app.get('/', (req, res) => {
   res.status(200).json({ 
     status: 'ok',
@@ -36,35 +34,9 @@ app.get('/', (req, res) => {
   });
 });
 
-
-
-app.get('/', (req, res) => {
-  res.status(200).json({ 
-    status: 'ok',
-    message: 'NoteX API',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Keep your existing health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
-
-// Add this BEFORE your other routes (after middleware)
-app.get('/', (req, res) => {
-  res.json({ 
-    status: 'ok',
-    message: 'NoteX API is running',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Health check (keep this too)
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
 
 const path = require('path');
 app.use('/files', express.static(path.join(process.env.FILES_DIR || '/data/files')));
