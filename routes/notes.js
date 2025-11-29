@@ -4,19 +4,14 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const { Storage } = require('@google-cloud/storage');
+const path = require('path');
+const fs = require('fs');
 const db = require('../db');
 const { authenticateUser } = require('./auth');
 
-// Configure Google Cloud Storage
-const storage = new Storage({
-  projectId: process.env.GCP_PROJECT_ID,
-  keyFilename: process.env.GCP_KEY_FILE
-});
-
-const bucket = storage.bucket(process.env.GCS_BUCKET_NAME);
-
-// Configure multer for file uploads
+// --------------------------
+// 1. Multer setup must come first
+// --------------------------
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -30,6 +25,47 @@ const upload = multer({
       cb(new Error('Invalid file type. Only PDF, JPG, PNG allowed'));
     }
   }
+});
+
+// --------------------------
+// 2. File storage folder (Railway volume)
+// --------------------------
+const FILES_DIR = process.env.FILES_DIR || '/data/files';
+if (!fs.existsSync(FILES_DIR)) {
+  fs.mkdirSync(FILES_DIR, { recursive: true });
+}
+
+// --------------------------
+// 3. Routes using `upload`
+// --------------------------
+router.post('/upload', authenticateUser, upload.single('file'), async (req, res) => {
+  const file = req.file;
+  if (!file) return res.status(400).json({ error: 'No file uploaded' });
+
+  const filename = `${Date.now()}-${file.originalname}`;
+  const savePath = path.join(FILES_DIR, filename);
+
+  // Write file to disk
+  fs.writeFileSync(savePath, file.buffer);
+
+  // Save file info in database
+  const { title, description, subject, level, price_usd, tags } = req.body;
+  const result = await db.query(
+    `INSERT INTO notes (seller_id, title, description, subject, level, price_usd, savePath, tags, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+    [
+      req.user.id,
+      title,
+      description,
+      subject,
+      level || 'undergraduate',
+      parseFloat(price_usd),
+      savePath,
+      tags ? tags.split(',') : [],
+      'pending'
+    ]
+  );
+  res.json({ success: true, note: result.rows[0] });
 });
 
 // GET /api/notes - List all published notes with filters
@@ -173,24 +209,8 @@ router.post('/upload', authenticateUser, upload.single('file'), async (req, res)
       return res.status(400).json({ error: 'Maximum price is $99.99' });
     }
 
-    // Upload file to Google Cloud Storage
-    const filename = `notes/${Date.now()}-${file.originalname}`;
-    const blob = bucket.file(filename);
-    
-    const blobStream = blob.createWriteStream({
-      resumable: false,
-      metadata: {
-        contentType: file.mimetype
-      }
-    });
 
-    await new Promise((resolve, reject) => {
-      blobStream.on('error', reject);
-      blobStream.on('finish', resolve);
-      blobStream.end(file.buffer);
-    });
 
-    const fileUrl = `gs://${process.env.GCS_BUCKET_NAME}/${filename}`;
 
     // Insert note into database
     const result = await db.query(`
@@ -249,15 +269,14 @@ router.get('/:id/download', authenticateUser, async (req, res) => {
       return res.status(404).json({ error: 'Note not found' });
     }
 
-    const fileUrl = noteResult.rows[0].file_url;
-    const filename = fileUrl.replace(`gs://${process.env.GCS_BUCKET_NAME}/`, '');
+    const filePath = path.join(__dirname, '..', noteResult.rows[0].file_url);
 
-    // Generate signed URL (valid for 1 hour)
-    const [signedUrl] = await bucket.file(filename).getSignedUrl({
-      version: 'v4',
-      action: 'read',
-      expires: Date.now() + 60 * 60 * 1000 // 1 hour
-    });
+if (!fs.existsSync(filePath)) {
+  return res.status(404).json({ error: 'File not found' });
+}
+
+res.download(filePath);
+
 
     res.json({
       success: true,
