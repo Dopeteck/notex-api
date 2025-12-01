@@ -7,7 +7,12 @@ const db = require('./db');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 8080; // CHANGED FROM 8080 TO 3000
+
+// Add this right after const app = express();
+app.get('/', (req, res) => {
+  res.json({ message: 'Server is running!' });
+});
 
 // Middleware
 app.use(helmet());
@@ -25,6 +30,15 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
+app.use(cors({
+  origin: [
+    'https://notex-app.web.app',  // Your Firebase domain
+    'https://notex-7f567.web.app', // Alternative Firebase domain
+    'http://localhost:3001'        // For local testing
+  ],
+  credentials: true
+}));
+
 // Root and health check routes (ONLY ONCE!)
 app.get('/', (req, res) => {
   res.status(200).json({ 
@@ -32,6 +46,26 @@ app.get('/', (req, res) => {
     message: 'NoteX API',
     timestamp: new Date().toISOString()
   });
+});
+
+// In server.js
+app.get('/api/health-check', async (req, res) => {
+  try {
+    // Test database
+    const dbResult = await db.query('SELECT NOW()');
+    
+    res.json({
+      status: 'healthy',
+      database: 'connected',
+      timestamp: dbResult.rows[0].now,
+      environment: process.env.NODE_ENV
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      status: 'unhealthy', 
+      error: error.message 
+    });
+  }
 });
 
 app.get('/health', (req, res) => {
@@ -48,6 +82,8 @@ app.use('/api/notes', require('./routes/notes'));
 app.use('/api/purchases', require('./routes/purchases'));
 app.use('/api/users', require('./routes/users'));
 app.use('/webhooks', require('./routes/webhooks'));
+app.use('/api/referrals', require('./routes/referrals'));
+
 
 // Error handler
 app.use((err, req, res, next) => {

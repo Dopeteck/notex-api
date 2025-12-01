@@ -26,6 +26,35 @@ function verifyTelegramWebAppData(initData, botToken) {
   return calculatedHash === hash;
 }
 
+// Generate unique referral code (8 characters like X7TFGY2O)
+async function generateUniqueReferralCode() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let attempts = 0;
+  const maxAttempts = 10;
+  
+  while (attempts < maxAttempts) {
+    let code = '';
+    for (let i = 0; i < 8; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    
+    // Check if code already exists
+    const result = await db.query(
+      'SELECT id FROM users WHERE referral_code = $1',
+      [code]
+    );
+    
+    if (result.rows.length === 0) {
+      return code;
+    }
+    
+    attempts++;
+  }
+  
+  // Fallback: use timestamp + random string if all attempts fail
+  return 'REF' + Date.now().toString().slice(-5);
+}
+
 router.post('/telegram-login', async (req, res) => {
   try {
     const { initData } = req.body;
@@ -55,9 +84,12 @@ router.post('/telegram-login', async (req, res) => {
     );
 
     if (user.rows.length === 0) {
+      // Generate unique referral code for new user
+      const referralCode = await generateUniqueReferralCode();
+      
       const result = await db.query(`
-        INSERT INTO users (telegram_id, username, first_name, plan, credits, wallet_balance)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO users (telegram_id, username, first_name, plan, credits, wallet_balance, referral_code)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING *
       `, [
         telegramUser.id.toString(),
@@ -65,9 +97,24 @@ router.post('/telegram-login', async (req, res) => {
         telegramUser.first_name || 'Student',
         'free',
         10,
-        0.00
+        0.00,
+        referralCode // Add unique referral code
       ]);
       user = result;
+    } else {
+      // Ensure existing users have a referral code
+      if (!user.rows[0].referral_code) {
+        const referralCode = await generateUniqueReferralCode();
+        await db.query(
+          'UPDATE users SET referral_code = $1 WHERE telegram_id = $2',
+          [referralCode, telegramUser.id.toString()]
+        );
+        // Refresh user data
+        user = await db.query(
+          'SELECT * FROM users WHERE telegram_id = $1',
+          [telegramUser.id.toString()]
+        );
+      }
     }
 
     const sessionToken = crypto.randomBytes(32).toString('hex');
@@ -114,3 +161,4 @@ async function authenticateUser(req, res, next) {
 
 module.exports = router;
 module.exports.authenticateUser = authenticateUser;
+module.exports.generateUniqueReferralCode = generateUniqueReferralCode;

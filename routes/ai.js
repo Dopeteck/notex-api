@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const db = require('../db');
-const { authenticateUser } = require('./auth');
+const crypto = require('crypto');
+const { authenticateUser } = require('./auth');  // Same directory
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
